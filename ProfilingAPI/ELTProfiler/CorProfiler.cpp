@@ -1,66 +1,144 @@
 // Copyright (c) .NET Foundation and contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
+#define __STDC_WANT_LIB_EXT1__ 1
+
 #include "CorProfiler.h"
 #include "corhlpr.h"
 #include "CComPtr.h"
 #include "profiler_pal.h"
+#include <string.h>
+#include <memory.h>  
 #include <string>
+#include <iostream>
+
+#define SHORT_LENGTH 256
 
 static CorProfiler* profiler = nullptr;
 
-PROFILER_STUB EnterStub(FunctionIDOrClientID functionId, COR_PRF_ELT_INFO eltInfo)
+inline void ConvertWCharToWCharT(wchar_t * dst, size_t dstLen, const WCHAR * src, size_t srcLen)
 {
-    ICorProfilerInfo3 *info = profiler->corProfilerInfo;
-    printf("EnterStub %lu\n", functionId);
+    if (dst == NULL || src == NULL)
+    {
+        return;
+    }
 
+    memcpy(dst, src, srcLen);
+}
+
+PROFILER_STUB EnterStub(FunctionIDOrClientID functionIdOrClientID, COR_PRF_ELT_INFO eltInfo)
+{
     COR_PRF_FRAME_INFO frameInfo;
-    ULONG argumentInfoSize = 0;
-
-    info->GetFunctionEnter3Info(
-            functionId.functionID,
-            eltInfo,
-            &frameInfo,
-            &argumentInfoSize,
-            nullptr
-    );
-
-    COR_PRF_FUNCTION_ARGUMENT_INFO *argumentInfo =
-        new COR_PRF_FUNCTION_ARGUMENT_INFO[argumentInfoSize];
-
-    HRESULT result = info->GetFunctionEnter3Info(
-            functionId.functionID,
-            eltInfo,
-            &frameInfo,
-            &argumentInfoSize,
-            argumentInfo
-    );
-    if (FAILED(result)) {
-        printf("Error: GetFunctionEnter3Info %x", result);
+    ULONG pcbArgumentInfo = sizeof(COR_PRF_FUNCTION_ARGUMENT_INFO);
+    COR_PRF_FUNCTION_ARGUMENT_INFO * pArgumentInfo = new COR_PRF_FUNCTION_ARGUMENT_INFO;
+    HRESULT hr = profiler->corProfilerInfo->GetFunctionEnter3Info(functionIdOrClientID.functionID, eltInfo, &frameInfo, &pcbArgumentInfo, pArgumentInfo);
+    if (hr != S_OK && hr != HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER))
+    {
+        delete pArgumentInfo;
+        return;
     }
-
-    printf(
-            "  argumentInfo:\n    numRanges: %u\n    totalArgumentSize: %u\n    ranges:\n",
-            argumentInfo->numRanges,
-            argumentInfo->totalArgumentSize
-    );
-
-    for (uint64_t i = 0; i < argumentInfo->numRanges; i++) {
-        COR_PRF_FUNCTION_ARGUMENT_RANGE range = argumentInfo->ranges[i];
-        printf(
-                "      startAddress: %p\n      length: %u\n",
-                (void *) range.startAddress,
-                range.length
-        );
-
-        printf("      data:");
-        for (UINT_PTR index = 0; index < range.length; index++) {
-            uint8_t byte = *(((uint8_t *) range.startAddress) + index);
-            printf(" %02x", byte);
+    else if (hr == HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER)) {
+        delete pArgumentInfo;
+        pArgumentInfo = reinterpret_cast <COR_PRF_FUNCTION_ARGUMENT_INFO *>  (new BYTE[pcbArgumentInfo]); 
+        hr = profiler->corProfilerInfo->GetFunctionEnter3Info(functionIdOrClientID.functionID, eltInfo, &frameInfo, &pcbArgumentInfo, pArgumentInfo);
+        if(hr != S_OK)
+        {
+            delete[] (BYTE *)pArgumentInfo;
+            return;
         }
-        printf("\n");
+    }
+    if(hr != S_OK)
+    {
+        printf("Did not encounter expected return value from GetFunctionEnter3Info\n");
+        if(pArgumentInfo != NULL)
+            delete pArgumentInfo;
+        return;
+    }
+    //DISPLAY("\nRanges : " << pArgumentInfo->numRanges);
+    ULONG totalArgumentSize = 0;
+    //DISPLAY("\ntotalArgumentSize  : " <<  pArgumentInfo->totalArgumentSize);
+    for(int k = 0 ; k < (int)pArgumentInfo->numRanges; k++)
+    {
+        printf("\npArgumentInfo->ranges[%d].length = %d\n", k, pArgumentInfo->ranges[k].length);
+        printf("\npArgumentInfo->ranges[%d].startAddress = %lx\n", k,pArgumentInfo->ranges[k].startAddress);
+        totalArgumentSize  += pArgumentInfo->ranges[k].length;
+    }
+    if(totalArgumentSize  != pArgumentInfo->totalArgumentSize)
+    {
+        printf("\ntotalArgumentSize did not match up to pArgumentInfo->totalArgumentSize");
+        return;
+    }   
+    else
+    {
+        //DISPLAY("\ntotalArgumentSize matched up to pArgumentInfo->totalArgumentSize");
     }
 
+    //WCHAR_STR( funcName );
+
+    //profiler->corProfilerInfo->GetFunctionIDName(functionIdOrClientID.functionID, funcName, frameInfo);
+    printf("Now getting funcName\n");
+
+    ModuleID modID;
+    ClassID classID;
+    mdToken token;
+    ClassID typeArgs[SHORT_LENGTH];
+    ULONG32 nTypeArgs;
+    profiler->corProfilerInfo->GetFunctionInfo2(
+            functionIdOrClientID.functionID,
+            frameInfo,
+            &classID,
+            &modID,
+            &token,
+            SHORT_LENGTH,
+            &nTypeArgs,
+            typeArgs);
+
+    IMetaDataImport * pIMDImport;
+
+    hr = profiler->corProfilerInfo->GetModuleMetaData(modID, ofRead, IID_IMetaDataImport, (IUnknown**)&pIMDImport); 
+
+    if (hr != S_OK)
+    {
+        printf("GetModuleMetaData failed\n");
+    }
+
+    WCHAR funcName[SHORT_LENGTH];
+    wchar_t funcNameTemp[SHORT_LENGTH];
+
+
+    hr = pIMDImport->GetMethodProps(token, NULL, funcName, SHORT_LENGTH, 0, 0, NULL, NULL, NULL, NULL);
+
+    if (hr != S_OK)
+    {
+        printf("GetMethodProps failed\n");
+    }
+
+    printf("Got funcName!!!!!!!!!!!!\n");
+
+    ConvertWCharToWCharT(funcNameTemp, SHORT_LENGTH, funcName, SHORT_LENGTH); 
+
+    wprintf(L"%ls\n", funcNameTemp); //std::wcout << L"funcName: " << funcNameTemp << std::endl;
+
+
+    
+
+    /*
+    for (ULONG32 i = 0; i < nTypeArgs; i++)
+    {
+        WCHAR_STR( className );
+        profiler->corProfilerInfo->GetClassIDName(typeArgs[(INT)i], className);
+
+        if (typeArgs[(INT)i] == 0)
+        {
+            DISPLAY("\nNull class ID returned as a Type Arg for a generic function.\n");
+            return;
+        }
+    }
+    if (NULL != pArgumentInfo)
+    {
+        delete[] (BYTE *)pArgumentInfo;
+    }
+    */
 }
 
 PROFILER_STUB LeaveStub(FunctionID functionId, COR_PRF_ELT_INFO eltInfo)
