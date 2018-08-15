@@ -11,8 +11,8 @@ class CorProfiler : public ICorProfilerCallback8
 {
 private:
     std::atomic<int> refCount;
-    ICorProfilerInfo8* corProfilerInfo;
 public:
+    ICorProfilerInfo8* corProfilerInfo;
     CorProfiler();
     virtual ~CorProfiler();
     HRESULT STDMETHODCALLTYPE Initialize(IUnknown* pICorProfilerInfoUnk) override;

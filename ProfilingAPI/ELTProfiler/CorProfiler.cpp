@@ -7,9 +7,60 @@
 #include "profiler_pal.h"
 #include <string>
 
+static CorProfiler* profiler = nullptr;
+
 PROFILER_STUB EnterStub(FunctionIDOrClientID functionId, COR_PRF_ELT_INFO eltInfo)
 {
-    printf("\r\nEnter %" UINT_PTR_FORMAT "", (UINT64)functionId.functionID);
+    ICorProfilerInfo3 *info = profiler->corProfilerInfo;
+    printf("EnterStub %lu\n", functionId);
+
+    COR_PRF_FRAME_INFO frameInfo;
+    ULONG argumentInfoSize = 0;
+
+    info->GetFunctionEnter3Info(
+            functionId.functionID,
+            eltInfo,
+            &frameInfo,
+            &argumentInfoSize,
+            nullptr
+    );
+
+    COR_PRF_FUNCTION_ARGUMENT_INFO *argumentInfo =
+        new COR_PRF_FUNCTION_ARGUMENT_INFO[argumentInfoSize];
+
+    HRESULT result = info->GetFunctionEnter3Info(
+            functionId.functionID,
+            eltInfo,
+            &frameInfo,
+            &argumentInfoSize,
+            argumentInfo
+    );
+    if (FAILED(result)) {
+        printf("Error: GetFunctionEnter3Info %x", result);
+    }
+
+    printf(
+            "  argumentInfo:\n    numRanges: %u\n    totalArgumentSize: %u\n    ranges:\n",
+            argumentInfo->numRanges,
+            argumentInfo->totalArgumentSize
+    );
+
+    for (uint64_t i = 0; i < argumentInfo->numRanges; i++) {
+        COR_PRF_FUNCTION_ARGUMENT_RANGE range = argumentInfo->ranges[i];
+        printf(
+                "      startAddress: %p\n      length: %u\n",
+                (void *) range.startAddress,
+                range.length
+        );
+
+        printf("      data:");
+        for (UINT_PTR index = 0; index < range.length; index++) {
+            uint8_t byte = *(((uint8_t *) range.startAddress) + index);
+            printf(" %02x", byte);
+        }
+        printf("\n");
+    }
+
 }
 
 PROFILER_STUB LeaveStub(FunctionID functionId, COR_PRF_ELT_INFO eltInfo)
@@ -114,6 +165,7 @@ HRESULT STDMETHODCALLTYPE CorProfiler::Initialize(IUnknown *pICorProfilerInfoUnk
     {
         printf("ERROR: Profiler SetEnterLeaveFunctionHooks3WithInfo failed (HRESULT: %d)", hr);
     }
+    profiler = this;
 
     return S_OK;
 }
