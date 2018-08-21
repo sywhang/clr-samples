@@ -13,6 +13,10 @@
 #include <iostream>
 
 #define SHORT_LENGTH 256
+#define STRING_LENGTH 256
+
+#define PROFILER_WCHAR WCHAR
+#define PLATFORM_WCHAR wchar_t
 
 static CorProfiler* profiler = nullptr;
 
@@ -24,6 +28,98 @@ inline void ConvertWCharToWCharT(wchar_t * dst, size_t dstLen, const WCHAR * src
     }
 
     memcpy(dst, src, srcLen);
+}
+
+HRESULT GetClassIDName(ClassID classId, wstring &name, const BOOL full)
+{
+    ModuleID modId;
+    mdTypeDef classToken;
+    ClassID parentClassID;
+    ULONG32 nTypeArgs;
+    ClassID typeArgs[SHORT_LENGTH];
+    HRESULT hr = S_OK;
+
+    if (classId == NULL)
+    {
+        return E_FAIL;
+    }
+
+    hr = profiler->corProfilerInfo->GetClassIDInfo2(classId,
+                                                    &modId,
+                                                    &classToken,
+                                                    &parentClassID,
+                                                    SHORT_LENGTH,
+                                                    &nTypeArgs,
+                                                    typeArgs);
+    if (CORPROF_E_CLASSID_IS_ARRAY == hr)
+    {
+        // We have a ClassID of an array.
+        name += L"ArrayClass";
+        return S_OK;
+    }
+    else if (CORPROF_E_CLASSID_IS_COMPOSITE == hr)
+    {
+        // We have a composite class
+        name += L"CompositeClass";
+        return S_OK;
+    }
+    else if (CORPROF_E_DATAINCOMPLETE == hr)
+    {
+        // type-loading is not yet complete. Cannot do anything about it.
+        name += L"DataIncomplete";
+        return S_OK;
+    }
+    else if (FAILED(hr))
+    {
+        FAILURE(L"GetClassIDInfo returned " << HEX(hr) << L" for ClassID " << HEX(classId));
+        return hr;
+    }
+
+    IMetaDataImport * pMDImport;
+    profiler->corProfilerInfo->GetModuleMetaData(modId,
+                                                (ofRead | ofWrite),
+                                                IID_IMetaDataImport,
+                                                (IUnknown **)&pMDImport ));
+
+
+    PROFILER_WCHAR wNameTemp[LONG_LENGTH];
+    PLATFORM_WCHAR wName[LONG_LENGTH];
+    DWORD dwTypeDefFlags = 0;
+    MUST_PASS(pMDImport->GetTypeDefProps(classToken,
+                                         wNameTemp,
+                                         LONG_LENGTH,
+                                         NULL,
+                                         &dwTypeDefFlags,
+                                         NULL));
+
+    ConvertWCharToWCharT(wName, STRING_LENGTH, wNameTemp, STRING_LENGTH);
+
+    if (full)
+    {
+        MUST_PASS(GetModuleIDName(modId, name, full));
+        name += L".";
+    }
+
+    name += wName;
+    if (nTypeArgs > 0)
+        name += L"<";
+
+    for(ULONG32 i = 0; i < nTypeArgs; i++)
+    {
+
+        wstring typeArgClassName;
+        typeArgClassName.clear();
+        MUST_PASS(GetClassIDName(typeArgs[i], typeArgClassName, FALSE));
+        name += typeArgClassName;
+
+        if ((i + 1) != nTypeArgs)
+            name += L", ";
+    }
+
+    if (nTypeArgs > 0)
+        name += L">";
+
+    return hr;
 }
 
 PROFILER_STUB EnterStub(FunctionIDOrClientID functionIdOrClientID, COR_PRF_ELT_INFO eltInfo)
@@ -54,9 +150,7 @@ PROFILER_STUB EnterStub(FunctionIDOrClientID functionIdOrClientID, COR_PRF_ELT_I
             delete pArgumentInfo;
         return;
     }
-    //DISPLAY("\nRanges : " << pArgumentInfo->numRanges);
     ULONG totalArgumentSize = 0;
-    //DISPLAY("\ntotalArgumentSize  : " <<  pArgumentInfo->totalArgumentSize);
     for(int k = 0 ; k < (int)pArgumentInfo->numRanges; k++)
     {
         printf("\npArgumentInfo->ranges[%d].length = %d\n", k, pArgumentInfo->ranges[k].length);
@@ -68,16 +162,10 @@ PROFILER_STUB EnterStub(FunctionIDOrClientID functionIdOrClientID, COR_PRF_ELT_I
         printf("\ntotalArgumentSize did not match up to pArgumentInfo->totalArgumentSize");
         return;
     }   
-    else
-    {
-        //DISPLAY("\ntotalArgumentSize matched up to pArgumentInfo->totalArgumentSize");
-    }
 
     //WCHAR_STR( funcName );
 
     //profiler->corProfilerInfo->GetFunctionIDName(functionIdOrClientID.functionID, funcName, frameInfo);
-    printf("Now getting funcName\n");
-
     ModuleID modID;
     ClassID classID;
     mdToken token;
@@ -113,32 +201,28 @@ PROFILER_STUB EnterStub(FunctionIDOrClientID functionIdOrClientID, COR_PRF_ELT_I
         printf("GetMethodProps failed\n");
     }
 
-    printf("Got funcName!!!!!!!!!!!!\n");
-
     ConvertWCharToWCharT(funcNameTemp, SHORT_LENGTH, funcName, SHORT_LENGTH); 
 
-    wprintf(L"%ls\n", funcNameTemp); //std::wcout << L"funcName: " << funcNameTemp << std::endl;
+    printf("\r\nEnter %" UINT_PTR_FORMAT "", (UINT64)functionIdOrClientID.functionID);
 
+    wprintf(L", FuncName: %ls\n", funcNameTemp); //std::wcout << L"funcName: " << funcNameTemp << std::endl;
 
-    
+    for (uint64_t i = 0; i < (int)pArgumentInfo->numRanges; i++) {
+        COR_PRF_FUNCTION_ARGUMENT_RANGE range = pArgumentInfo->ranges[i];
+        printf(
+                "      startAddress: %p\n      length: %u\n",
+                (void *) range.startAddress,
+                range.length
+        );
 
-    /*
-    for (ULONG32 i = 0; i < nTypeArgs; i++)
-    {
-        WCHAR_STR( className );
-        profiler->corProfilerInfo->GetClassIDName(typeArgs[(INT)i], className);
-
-        if (typeArgs[(INT)i] == 0)
-        {
-            DISPLAY("\nNull class ID returned as a Type Arg for a generic function.\n");
-            return;
+        printf("      data:");
+        for (UINT_PTR index = 0; index < range.length; index++) {
+            uint8_t byte = *(((uint8_t *) range.startAddress) + index);
+            printf(" %02x", byte);
         }
+        printf("\n");
     }
-    if (NULL != pArgumentInfo)
-    {
-        delete[] (BYTE *)pArgumentInfo;
-    }
-    */
+
 }
 
 PROFILER_STUB LeaveStub(FunctionID functionId, COR_PRF_ELT_INFO eltInfo)
