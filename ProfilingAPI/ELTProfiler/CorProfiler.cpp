@@ -13,10 +13,15 @@
 #include <iostream>
 
 #define SHORT_LENGTH 256
+#define LONG_LENGTH 256
 #define STRING_LENGTH 256
 
 #define PROFILER_WCHAR WCHAR
 #define PLATFORM_WCHAR wchar_t
+
+#define HEX
+#define FLT std::fixed
+
 
 static CorProfiler* profiler = nullptr;
 
@@ -29,8 +34,9 @@ inline void ConvertWCharToWCharT(wchar_t * dst, size_t dstLen, const WCHAR * src
 
     memcpy(dst, src, srcLen);
 }
+/*
 
-HRESULT GetClassIDName(ClassID classId, wstring &name, const BOOL full)
+HRESULT GetClassIDName(ClassID classId, std::wstring &name, const BOOL full)
 {
     ModuleID modId;
     mdTypeDef classToken;
@@ -39,7 +45,7 @@ HRESULT GetClassIDName(ClassID classId, wstring &name, const BOOL full)
     ClassID typeArgs[SHORT_LENGTH];
     HRESULT hr = S_OK;
 
-    if (classId == NULL)
+    if ((void*)classId == NULL)
     {
         return E_FAIL;
     }
@@ -79,7 +85,7 @@ HRESULT GetClassIDName(ClassID classId, wstring &name, const BOOL full)
     profiler->corProfilerInfo->GetModuleMetaData(modId,
                                                 (ofRead | ofWrite),
                                                 IID_IMetaDataImport,
-                                                (IUnknown **)&pMDImport ));
+                                                (IUnknown **)&pMDImport );
 
 
     PROFILER_WCHAR wNameTemp[LONG_LENGTH];
@@ -107,7 +113,7 @@ HRESULT GetClassIDName(ClassID classId, wstring &name, const BOOL full)
     for(ULONG32 i = 0; i < nTypeArgs; i++)
     {
 
-        wstring typeArgClassName;
+        std::wstring typeArgClassName;
         typeArgClassName.clear();
         MUST_PASS(GetClassIDName(typeArgs[i], typeArgClassName, FALSE));
         name += typeArgClassName;
@@ -121,6 +127,7 @@ HRESULT GetClassIDName(ClassID classId, wstring &name, const BOOL full)
 
     return hr;
 }
+*/
 
 PROFILER_STUB EnterStub(FunctionIDOrClientID functionIdOrClientID, COR_PRF_ELT_INFO eltInfo)
 {
@@ -204,8 +211,9 @@ PROFILER_STUB EnterStub(FunctionIDOrClientID functionIdOrClientID, COR_PRF_ELT_I
     ConvertWCharToWCharT(funcNameTemp, SHORT_LENGTH, funcName, SHORT_LENGTH); 
 
     printf("\r\nEnter %" UINT_PTR_FORMAT "", (UINT64)functionIdOrClientID.functionID);
+    wprintf(L", FuncName: %ls\n", funcNameTemp);//%" UINT_PTR_FORMAT "", (UINT64)functionIdOrClientID.functionID);
 
-    wprintf(L", FuncName: %ls\n", funcNameTemp); //std::wcout << L"funcName: " << funcNameTemp << std::endl;
+    //std::wcout << L"funcName: " << funcNameTemp << std::endl;
 
     for (uint64_t i = 0; i < (int)pArgumentInfo->numRanges; i++) {
         COR_PRF_FUNCTION_ARGUMENT_RANGE range = pArgumentInfo->ranges[i];
